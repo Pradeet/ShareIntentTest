@@ -1,14 +1,17 @@
 package com.pradeet.shareintenttest;
 
 import android.Manifest;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.Fragment;
-import android.os.Bundle;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -17,23 +20,25 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 
 import com.nostra13.universalimageloader.core.ImageLoader;
-import com.nostra13.universalimageloader.core.assist.FailReason;
-import com.nostra13.universalimageloader.core.listener.SimpleImageLoadingListener;
-import com.pradeet.shareintenttest.utils.PathUtil;
-import com.pradeet.shareintenttest.utils.UriUtils;
+
+import org.apache.commons.io.IOUtils;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
+
+import de.cketti.safecontentresolver.SafeContentResolver;
+import de.cketti.safecontentresolver.SafeContentResolverCompat;
 
 /**
  * A placeholder fragment containing a simple view.
  */
 public class ShareActivityFragment extends Fragment {
-
+    private static final String FILENAME_PREFIX = "attachment";
     private static final int MY_PERMISSIONS_REQUEST_READ_EXTERNAL_STORAGE = 123;
+
     private ImageLoader imageLoader;
 
     public ShareActivityFragment() {
@@ -95,50 +100,72 @@ public class ShareActivityFragment extends Fragment {
         }
     }
 
-    private String handleSendImage(Intent intent) {
+    private void handleSendImage(Intent intent) {
         Uri imageUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-        imageLoader.loadImage(imageUri.getPath(), new SimpleImageLoadingListener() {
-            @Override
-            public void onLoadingComplete(String imageUri, View view, Bitmap loadedImage) {
-                Log.d("assd", "" + loadedImage.toString());
-            }
 
-            @Override
-            public void onLoadingFailed(String imageUri, View view, FailReason failReason) {
-                Log.d("assd", "Failed to load Image" + failReason.toString());
+        long size = -1;
+        String name = null;
+        String filePath = null;
+
+        ContentResolver contentResolver = getContext().getContentResolver();
+
+        String[] projection = new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+        Cursor metadataCursor = contentResolver.query(
+                imageUri,
+                projection,
+                null,
+                null,
+                null);
+
+        if (metadataCursor != null) {
+            try {
+                if (metadataCursor.moveToFirst()) {
+                    name = metadataCursor.getString(0);
+                    size = metadataCursor.getInt(1);
+                    filePath = getFilePath(imageUri);
+
+                    Bitmap bitmap = BitmapFactory.decodeFile(filePath);
+                    imageView.setImageBitmap(bitmap);
+                }
+            } finally {
+                metadataCursor.close();
             }
-        });
-        String path = "";
-//        if (imageUri != null) {
-//            try {
-//                path = PathUtil.getPath(getContext(), imageUri);
-//                if (path != null) {
-//                    File imgFile = new File(path);
-//                    if (imgFile.exists()) {
-//                        InputStream ims = getContext().getContentResolver().openInputStream(UriUtils.fromFile(getContext(), imgFile));
-////                        Bitmap myBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath());
-//                        Bitmap myBitmap = BitmapFactory.decodeStream(ims);
-//                        if (myBitmap != null) {
-//                            imageView.setImageBitmap(myBitmap);
-//                        } else {
-//                            Log.d("halaluya", "Fucking BitmapFactory");
-//                        }
-//                    }
-//                }
-//            } catch (URISyntaxException e) {
-//                e.printStackTrace();
-//            } catch (FileNotFoundException e) {
-//                e.printStackTrace();
-//            }
-//        }
-        return path;
+        }
     }
 
-    void handleSendMultipleImages(Intent intent) {
+    private void handleSendMultipleImages(Intent intent) {
         ArrayList<Uri> imageUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
         if (imageUris != null) {
             // Update UI to reflect multiple images being shared
         }
+    }
+
+    private String getFilePath(Uri uri) {
+        try {
+            File file = File.createTempFile(FILENAME_PREFIX, null, getContext().getCacheDir());
+            file.deleteOnExit();
+
+            Log.d("halaluya", "Saving attachment to: ---> " + file.getAbsolutePath());
+
+            SafeContentResolver safeContentResolver = SafeContentResolverCompat.newInstance(getContext());
+            InputStream in = safeContentResolver.openInputStream(uri);
+            try {
+                FileOutputStream out = new FileOutputStream(file);
+                try {
+                    IOUtils.copy(in, out);
+                } finally {
+                    out.close();
+                }
+            } finally {
+                in.close();
+            }
+
+            return file.getAbsolutePath();
+        } catch (IOException e) {
+            Log.d("halaluya", "Error saving attachment: ---> " + e.getMessage());
+        }
+
+        return null;
     }
 
     @Override
